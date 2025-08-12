@@ -23,6 +23,7 @@ from src.browser.custom_browser import CustomBrowser
 from src.controller.custom_controller import CustomController
 from src.utils import llm_provider
 from src.webui.webui_manager import WebuiManager
+from src.utils.browser_connector import browser_connector
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +371,22 @@ async def run_agent_task(
                 browser_user_data = browser_user_data_dir or os.getenv("BROWSER_USER_DATA", None)
                 if browser_user_data:
                     extra_args += [f"--user-data-dir={browser_user_data}"]
+                
+                # Log auto-configuration status
+                logger.info(f"🔍 Auto-configuration status:")
+                logger.info(f"   - Use own browser: {use_own_browser}")
+                logger.info(f"   - Browser binary path: {browser_binary_path}")
+                logger.info(f"   - Browser user data: {browser_user_data}")
+                logger.info(f"   - Extra args: {extra_args}")
+                
+                if browser_binary_path and os.path.exists(browser_binary_path):
+                    logger.info(f"✅ Using local Chrome browser: {browser_binary_path}")
+                else:
+                    logger.warning(f"⚠️ Chrome binary not found, falling back to Playwright")
+                    browser_binary_path = None
             else:
                 browser_binary_path = None
+                logger.info("📱 Using Playwright browser (use_own_browser=False)")
 
             webui_manager.bu_browser = CustomBrowser(
                 config=BrowserConfig(
@@ -666,6 +681,42 @@ async def run_agent_task(
 
 # --- Button Click Handlers --- (Need access to webui_manager)
 
+async def execute_task_in_existing_browser(task: str) -> Dict[str, Any]:
+    """Execute task in existing browser session"""
+    try:
+        # Get auto-configured Chrome settings
+        from src.utils.auto_config import AutoConfig
+        config = AutoConfig.load_config()
+        
+        chrome_path = config.get("BROWSER_PATH")
+        user_data_dir = config.get("BROWSER_USER_DATA")
+        
+        if not chrome_path or not user_data_dir:
+            return {
+                "success": False,
+                "message": "Chrome not configured. Please check browser settings."
+            }
+        
+        # Connect to existing browser
+        connected = await browser_connector.connect_to_existing_chrome(chrome_path, user_data_dir)
+        
+        if not connected:
+            return {
+                "success": False,
+                "message": "Could not connect to existing browser. Please ensure Chrome is running."
+            }
+        
+        # Execute task
+        result = await browser_connector.execute_task(task)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error executing task in existing browser: {e}")
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }
+
 async def handle_submit(
         webui_manager: WebuiManager, components: Dict[gr.components.Component, Any]
 ):
@@ -696,8 +747,29 @@ async def handle_submit(
         yield {}  # No change
     else:
         logger.info("Submit button clicked for new task.")
-        async for update in run_agent_task(webui_manager, components):
-            yield update
+        
+        # Use existing browser approach instead of launching new browser
+        result = await execute_task_in_existing_browser(user_input_value)
+        
+        # Update UI with result
+        chat_output_comp = webui_manager.get_component_by_id("browser_use_agent.chat_output")
+        
+        if result["success"]:
+            message = f"✅ {result['message']}\n📍 URL: {result.get('url', 'N/A')}\n📄 Title: {result.get('title', 'N/A')}"
+            gr.Info(f"Task completed successfully: {result['message']}")
+        else:
+            message = f"❌ {result['message']}"
+            gr.Warning(f"Task failed: {result['message']}")
+        
+        # Add message to chat
+        current_chat = components.get(chat_output_comp, [])
+        current_chat.append([user_input_value, message])
+        
+        yield {
+            chat_output_comp: current_chat,
+            user_input_comp: gr.update(value="", interactive=True),
+            webui_manager.get_component_by_id("browser_use_agent.run_button"): gr.update(value="▶️ Submit Task", interactive=True),
+        }
 
 async def handle_stop(webui_manager: WebuiManager):
     """Handles clicks on the 'Stop' button."""

@@ -6,6 +6,7 @@ from gradio.components import Component
 
 from src.webui.webui_manager import WebuiManager
 from src.utils import config
+from src.utils.auto_config import AutoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,27 +34,53 @@ def create_browser_settings_tab(webui_manager: WebuiManager):
     """
     input_components = set(webui_manager.get_components())
     tab_components = {}
+    
+    # Get auto-configuration status
+    chrome_status = AutoConfig.get_chrome_status()
+    
+    # Load auto-configured values
+    auto_config = AutoConfig.load_config()
 
+    # Auto-configuration status section
+    with gr.Group():
+        with gr.Row():
+            chrome_status_text = gr.Markdown(
+                value=f"""
+                ## 🔍 Chrome Auto-Detection Status
+                
+                **Chrome Detected:** {'✅ Yes' if chrome_status['chrome_detected'] else '❌ No'}
+                **Chrome Path:** {chrome_status['chrome_path'] or 'Not found'}
+                **User Data Directory:** {chrome_status['user_data_dir'] or 'Not found'}
+                **Using Local Chrome:** {'✅ Yes' if chrome_status['use_own_browser'] else '❌ No (Playwright)'}
+                **Connection Tested:** {'✅ Yes' if chrome_status['connection_tested'] else '❌ No'}
+                
+                *Auto-detection runs on startup. Chrome will be used for automation if detected and connection test passes.*
+                """,
+                label="Auto-Configuration Status"
+            )
+    
     with gr.Group():
         with gr.Row():
             browser_binary_path = gr.Textbox(
-                label="Browser Binary Path",
+                label="Browser Binary Path (Auto-detected)",
                 lines=1,
                 interactive=True,
-                placeholder="e.g. '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome'"
+                placeholder="e.g. '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome'",
+                value=auto_config.get("BROWSER_PATH", chrome_status['chrome_path'] or "")
             )
             browser_user_data_dir = gr.Textbox(
-                label="Browser User Data Dir",
+                label="Browser User Data Dir (Auto-detected)",
                 lines=1,
                 interactive=True,
                 placeholder="Leave it empty if you use your default user data",
+                value=auto_config.get("BROWSER_USER_DATA", chrome_status['user_data_dir'] or "")
             )
     with gr.Group():
         with gr.Row():
             use_own_browser = gr.Checkbox(
                 label="Use Own Browser",
-                value=bool(strtobool(os.getenv("USE_OWN_BROWSER", "false"))),
-                info="Use your existing browser instance",
+                value=bool(strtobool(auto_config.get("USE_OWN_BROWSER", os.getenv("USE_OWN_BROWSER", "false")))),
+                info="Use your existing browser instance (Auto-configured)",
                 interactive=True
             )
             keep_browser_open = gr.Checkbox(

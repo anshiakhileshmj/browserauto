@@ -35,10 +35,6 @@ class BrowserUseAgent(Agent):
                 return 'raw'
             elif self.chat_model_library == 'ChatGoogleGenerativeAI':
                 return None
-            elif self.chat_model_library == 'ChatOpenAI':
-                return 'function_calling'
-            elif self.chat_model_library == 'AzureChatOpenAI':
-                return 'function_calling'
             else:
                 return None
         else:
